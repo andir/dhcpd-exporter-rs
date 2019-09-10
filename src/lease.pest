@@ -1,0 +1,118 @@
+whitespace = _{ (" "|"\t") }
+// 
+space = _{ whitespace+ }
+// 
+// key = {
+// 	"starts"
+// }
+// 
+datetime = { weekday ~ " " ~ year ~ "/" ~ month ~ "/" ~ day ~ " " ~ hour ~ ":" ~ minute ~ ":" ~ seconds }
+	weekday = { '0'..'6' }
+	year = { ASCII_DIGIT{4} }
+	month = { ASCII_DIGIT{1,2} }
+	day = { ASCII_DIGIT{1,2} }
+	hour = { ASCII_DIGIT{1,2} }
+	minute = { ASCII_DIGIT{1,2} }
+	seconds = { ASCII_DIGIT{1,2} }
+
+// 
+// 
+// starts_line = { "starts" ~ space ~ datetime }
+// ends_line = { "starts" ~ space ~ datetime }
+// 
+// value = _{
+// 	(
+// 		starts_line |
+// 		ends_line
+// 	) ~ ";" ~ NEWLINE
+// }
+// 
+// lease_body = _{
+//     value+ ~
+//     ANY+
+// }
+// 
+address = {
+	ASCII_DIGIT{1,3} ~ "." ~
+	ASCII_DIGIT{1,3} ~ "." ~
+	ASCII_DIGIT{1,3} ~ "." ~
+	ASCII_DIGIT{1,3}
+}
+// 
+// lease = {
+//   ("lease" ~ space ~ address ~ "{" ~ NEWLINE ~ lease_body ~ "}")
+// }
+// 
+// comment = _{ "#" ~ (!"\n" ~ ANY)* ~ NEWLINE }
+// 
+// authoring_byte_order = { "authoring-byte-order" ~ (!NEWLINE ~ ANY)}
+// 
+// lease_file = _{ SOI ~ ((authoring_byte_order | comment | lease)? ~ NEWLINE)+ ~ EOI }
+// 
+// lease_list = { (lease ~ NEWLINE)+ }
+
+comment = { "#" ~ ((!"\n") ~ ANY)* ~ NEWLINE }
+empty_line = { (" " | "\t" | NEWLINE )+ }
+statement = { " "* ~ key ~ " " ~ value  ~ ";" ~ NEWLINE }
+key = @{ (!(" " | NEWLINE) ~ ANY)+  }
+value = @{ ( quoted_value | unquoted_value) }
+unquoted_value = { (!(";" | NEWLINE) ~ ANY)+ }
+
+quote = _{ "\"" }
+escaped_quote = _{ "\\\"" }
+quoted_value = _{ quote ~ quoted_value_inner* ~ quote}
+
+raw_string = { (!("\\" | "\"") ~ ANY)+ }
+predefined = { "n" | "r" | "t" | "\\" | "0" | "\"" | "'" }
+octet      = { ('0'..'9'){3} }
+escape = { "\\" ~ (predefined|octet) }
+
+quoted_value_inner = {
+	(raw_string | escape)
+//    !("\"") ~ ANY
+//    | "\\" ~ ANY
+
+//	escaped_quote |
+//	(!quote ~ ANY)
+}
+
+starts_field = { "starts" ~ space ~ datetime }
+ends_field = { "ends" ~ space ~ datetime }
+tstp_field = { "tstp" ~ space ~ datetime }
+cltt_field = { "cltt" ~ space ~ datetime }
+binding_state_field = { "binding state" ~ space ~ unquoted_value }
+
+
+lease_fields = {
+	(space ~ (
+		starts_field |
+		ends_field |
+		tstp_field |
+		cltt_field |
+		binding_state_field |
+		("next binding state" ~ space ~ unquoted_value) |
+		("rewind binding state" ~ space ~ unquoted_value) |
+		("hardware ethernet" ~ space ~ unquoted_value) |
+		("set" ~ space ~ value) |
+		("uid" ~ space ~ quoted_value) |
+		("client-hostname" ~ space ~ quoted_value)
+	) ~
+	 ";" ~ NEWLINE
+	)
+}
+
+lease = {
+	"lease" ~ " " ~ address ~ " "+ ~ "{" ~ " "* ~ NEWLINE ~
+	(lease_fields)+ ~
+	"}" ~ NEWLINE
+
+}
+
+content = _{ ( comment | empty_line | statement | lease ) }
+
+lease_file = _{
+	SOI ~
+	content* ~
+	EOI
+}
+

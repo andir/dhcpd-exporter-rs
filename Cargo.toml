@@ -1,0 +1,18 @@
+[package]
+name = "dhcpd-exporter-rs"
+version = "0.1.0"
+authors = ["Andreas Rammhold <andreas@rammhold.de>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ipnetwork = "0.14.0"          # A library to work with IP CIDRs in Rust, heavily WIP
+clap = "2.33.0"                   # A simple to use, efficient, and full-featured Command Line Argument Parser
+lazy_static = "1.4.0"                   # A macro for declaring lazily evaluated statics in Rust.
+hyper = "0.12.0"                         # A fast and correct HTTP library.
+pest = "2.1.2"                  # The Elegant Parser
+pest_derive = "2.1.0"           # pest's derive macro
+chrono = "0.4.9"                    # Date and time library for Rust
+failure = "0.1.5"                    # Experimental error handling abstraction.
+prometheus = "0.7.0"                         # Prometheus instrumentation library for Rust applications.
