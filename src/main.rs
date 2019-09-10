@@ -260,7 +260,7 @@ fn main() {
         .collect::<Result<_, _>>()
         .unwrap();
 
-    let addr = ([127, 0, 0, 1], port).into();
+    let addr = ([0, 0, 0, 0, 0, 0, 0, 0, ], port).into();
     println!("Listening on {}", addr);
 
     std::thread::spawn(move || {
