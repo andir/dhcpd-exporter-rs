@@ -18,7 +18,9 @@ use pest::Parser;
 use std::convert::TryFrom;
 
 use hyper::{rt::Future, service::service_fn_ok, Body, Response, Server};
-use prometheus::{linear_buckets, Encoder, Gauge, Histogram, HistogramVec, TextEncoder};
+use prometheus::{
+    linear_buckets, Encoder, Gauge, Histogram, HistogramVec, IntGaugeVec, TextEncoder,
+};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum BindingState {
@@ -147,8 +149,6 @@ impl TryFrom<pest::iterators::Pair<'_, Rule>> for Lease {
 struct LeaseParser;
 
 lazy_static! {
-    static ref ACTIVE_LEASES_GAUGE: Gauge =
-        register_gauge!(opts!("dhcpd_active_leases_total", "Total active leases")).unwrap();
     static ref PARSE_TIME: Histogram = register_histogram!(histogram_opts!(
         "dhcpd_parse_time",
         "Time it took to parse the lease file",
@@ -160,6 +160,12 @@ lazy_static! {
         "Age of active leases",
         &["network"],
         vec![60.0, 300.0, 600.0, 1200.0, 1500.0, 2100.0, 2400.0, 2700.0, 3600.0]
+    )
+    .unwrap();
+    static ref LEASES: IntGaugeVec = register_int_gauge_vec!(
+        "dhcpd_leases",
+        "Total known DHCP leases",
+        &["network", "binding_state", "valid"]
     )
     .unwrap();
 }
@@ -184,20 +190,42 @@ fn update_counter(filename: &str, networks: &[ipnetwork::Ipv4Network]) -> Result
 
     PARSE_TIME.observe(duration as f64);
 
-    let active_leases: Vec<&Lease> = leases
-        .iter()
-        .filter(|l| l.binding_state == BindingState::Active && l.ends > now)
-        .collect();
+    let valid = |l: &&Lease| l.ends > now;
+    let invalid = |l: &&Lease| l.ends <= now;
+    let active = |l: &&Lease| l.binding_state == BindingState::Active;
+    let free = |l: &&Lease| l.binding_state == BindingState::Free;
+    let abandoned = |l: &&Lease| l.binding_state == BindingState::Abandoned;
 
-    ACTIVE_LEASES_GAUGE.set(active_leases.len() as f64);
+    let filters: Vec<(&Fn(&&Lease) -> bool, &Fn(&&Lease) -> bool, &[&str])> = vec![
+        (&active, &valid, &["active", "true"]),
+        (&active, &invalid, &["active", "false"]),
+        (&free, &valid, &["free", "true"]),
+        (&free, &invalid, &["free", "false"]),
+        (&abandoned, &valid, &["free", "true"]),
+        (&abandoned, &invalid, &["free", "false"]),
+    ];
 
-    for network in networks {
-        let label = format!("{}", network);
-        let leases = active_leases.iter().filter(|l| network.contains(l.ip));
-        let histogram = ACTIVE_LEASE_AGE.with_label_values(&[&label]);
-        for lease in leases {
-            let age = (now - lease.starts).num_milliseconds() as f64;
-            histogram.observe(age);
+    for (i, (f1, f2, filter_labels)) in filters.iter().enumerate() {
+        for network in networks {
+            let n = format!("{}", network);
+            let labels = {
+                let mut labels = vec![&n[..]];
+                labels.extend(filter_labels.iter().cloned());
+                labels
+            };
+            let leases: Vec<&Lease> = leases.iter().filter(|l| network.contains(l.ip)).collect();
+
+            if i == 0 {
+                // once for every network
+                let histogram = ACTIVE_LEASE_AGE.with_label_values(&[&n]);
+                for lease in leases.iter().cloned().filter(active).filter(valid) {
+                    let age = ((now - lease.starts).num_milliseconds() as f64) / 1000.;
+                    histogram.observe(age);
+                }
+            }
+
+            let ls = leases.iter().cloned().filter(f1).filter(f2).count();
+            LEASES.with_label_values(&labels[..]).set(ls as i64);
         }
     }
 
@@ -252,7 +280,10 @@ fn main() {
         .parse()
         .expect("Not a valid port");
 
-    let filename = matches.value_of("LEASE_FILE").expect("lease file missing").to_string();
+    let filename = matches
+        .value_of("LEASE_FILE")
+        .expect("lease file missing")
+        .to_string();
 
     let raw_subnets = matches.values_of("SUBNET").expect("Subnets missing");
     let subnets: Vec<ipnetwork::Ipv4Network> = raw_subnets
@@ -260,7 +291,7 @@ fn main() {
         .collect::<Result<_, _>>()
         .unwrap();
 
-    let addr = ([0, 0, 0, 0, 0, 0, 0, 0, ], port).into();
+    let addr = ([0, 0, 0, 0, 0, 0, 0, 0], port).into();
     println!("Listening on {}", addr);
 
     std::thread::spawn(move || {
